@@ -1,0 +1,331 @@
+---
+title: "Assignment 1"
+author: "Jiahui Chen"
+date: "2021/12/1"
+output: 
+  html_document:
+    code_folding: show
+    highlight: haddock
+    theme: lumen
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+---
+
+```{r, echo=FALSE, message=FALSE}
+if(!require('pacman')) {
+  install.packages('pacman')
+}
+pacman::p_load(ISLR, dplyr, splines,reshape2,ggplot2)
+```
+
+## Question 1:
+
+First, take a look at the data.
+
+```{r}
+auto <- ISLR::Auto
+str(auto)
+summary(auto)
+auto <- auto %>% mutate(year = as.factor(year), origin = as.factor(origin))
+```
+
+
+
+```{r}
+# Fit a cubic polynomial regression and output results
+fit1 <- lm(mpg ~ poly(horsepower, 3), data = auto) 
+summary(fit1)
+```
+
+
+From the above the regression summary, the cubic term is not statistically significant at 0.05 level. 
+
+### (a)
+
+```{r}
+# plot the data points and regression fit
+seq_horsepower <- seq(min(auto$horsepower), max(auto$horsepower))     # set up the x grid
+predict1 <- predict(fit1, newdata = list(horsepower = seq_horsepower), se = TRUE)
+plot(auto$horsepower, auto$mpg, cex = 1, col = "darkgray", xlab = "Horsepower", ylab = "mpg", main = "Cubic Polynomial Regression")
+lines(seq_horsepower, predict1$fit, lwd = 2, col = "blue")
+se.bands <- cbind(predict1$fit + 2 * predict1$se.fit, predict1$fit - 2 * predict1$se.fit)  # construct CI
+matlines(seq_horsepower, se.bands, lwd = 1, col = "blue", lty = 3)    # plot CI
+```
+
+The scatter points are original data, the blue line is the polynomial fit.
+
+### (b)
+```{r}
+fit2 <- lm(mpg ~ bs(horsepower, df = 6), data = auto)
+summary(fit2)
+```
+
+
+Setting 6 degrees of freedom in bs() function will automatically split x's into 7 equal intervals. The x values that separate the intervals are the knots. 
+
+
+```{r}
+# plot the data points and regression fit
+predict2 <- predict(fit2, newdata = list(horsepower = seq_horsepower), se = TRUE)
+plot(auto$horsepower, auto$mpg, cex = 1, col = "darkgray", xlab = "Horsepower", ylab = "mpg", main = "Cubic Spline with 6 Degree of Freedom")
+lines(seq_horsepower, predict2$fit, lwd = 2, col = "blue")
+se.bands2 <- cbind(predict2$fit + 2 * predict2$se.fit, predict2$fit - 2 * predict2$se.fit)  # construct CI
+matlines(seq_horsepower, se.bands2, lwd = 1, col = "blue", lty = 3)    # plot CI
+```
+
+
+### (c)
+
+```{r}
+fits <- list()
+rss <- c()
+data <- data.frame()
+for (i in 4:12) {
+  newfit <- lm(mpg ~ bs(horsepower, df = i), data = auto)
+  fits <- c(fits, newfit)
+  rss <- c(rss, sum(newfit$residuals^2))
+  predicts <- predict(newfit, newdata = list(horsepower = seq_horsepower), se = TRUE)
+  data <- rbind(data, data.frame(x = seq_horsepower, y = predicts$fit, df = i))
+}
+
+# plot resulting fits
+ggplot(data = data, aes(x = x, y = y)) +                      
+  geom_point(data = auto, aes(horsepower, mpg), colour = "darkgray", size = 1) + 
+  geom_line(aes(colour = as.factor(df))) +
+  labs(x = "Horsepower", y = "mpg", title = "Cubic Splines of Different Degrees of Freedom")
+  
+# plot resulting RSS
+ggplot(data = data.frame(df = c(4:12), rss = rss), aes(df, rss)) +
+  geom_line(colour = "blue") +
+  geom_point(colour = "blue") +
+  labs(x = "Degree of freedom", y = "RSS", title = "Scree Plot")
+```
+
+
+From the first graph, it is obvious that splines with smaller degree of freedom(4) and large degree of freedom(12) have different fits than other splines. Large degree of freedom might cause overfitting, and small degree of freedom might have large bias. From second graph, RSS decreases as degree of freedom increases. 
+
+
+### (d)
+
+Build a 5-fold cross validation to select the degree of freedom with smallest MSE.
+
+```{r, warning=FALSE}
+set.seed(6)
+n.k <- 5
+n.df <- 9
+cv.auto <- cbind(auto, fold = sample(1:n.k, nrow(auto), replace = TRUE))
+matrix.k <- matrix(nrow=n.k, ncol=n.df)
+
+for (k in 1:n.k){
+  train <- cv.auto[which(cv.auto$fold != k),]
+  test <- cv.auto[which(cv.auto$fold == k),]
+  for (n in 1:n.df){
+    fit <- lm(mpg ~ bs(horsepower, df = (n + 3)), data = train)
+    predicts <- predict(fit, newdata = test)
+    matrix.k[k, n] <- mean((test$mpg - predicts)^2)
+  }
+}
+df <- data.frame(df = 4:12, mse = apply(matrix.k,2,mean))
+
+ggplot(data = df, aes(df, mse)) +
+  geom_line(colour = "blue") +
+  geom_point(colour = "blue") +
+  labs(x = "Degree of freedom", y = "MSE", title = "Scree Plot of Cubic Splines")
+```
+
+In terms of MSEs', cross validation outputs two options as the optimal degree of freedom for the cubic spline on this data, which are 5 and 12. I would prefer 5 because although increasing degree of freedom to 12 decreases MSE, it might cause overfitting. 
+
+
+### (e)
+
+```{r}
+fite <- lm(mpg~ ns(horsepower, df = 4), data = auto)
+summary(fite)
+predicte <- predict(fite, newdata = list(horsepower = seq_horsepower), se = TRUE)
+plot(auto$horsepower, auto$mpg, cex = 1, col = "darkgray", xlab = "Horsepower", ylab = "mpg", main = "Natural Cubic Spline of 4 Degrees of Freedom")
+lines(seq_horsepower, predicte$fit, lwd = 2, col = "blue")
+se.bandse <- cbind(predicte$fit + 2 * predicte$se.fit, predicte$fit - 2 * predicte$se.fit)  # construct CI
+matlines(seq_horsepower, se.bandse, lwd = 1, col = "blue", lty = 3)    # plot CI
+```
+
+
+### (f)
+
+
+```{r}
+fits <- list()
+rss <- c()
+data <- data.frame()
+for (i in 2:10) {
+  newfit <- lm(mpg ~ ns(horsepower, df = i), data = auto)
+  fits <- c(fits, newfit)
+  rss <- c(rss, sum(newfit$residuals^2))
+  predicts <- predict(newfit, newdata = list(horsepower = seq_horsepower), se = TRUE)
+  data <- rbind(data, data.frame(x = seq_horsepower, y = predicts$fit, df = i))
+}
+
+# plot resulting fits
+ggplot(data = data, aes(x = x, y = y)) +                      
+  geom_point(data = auto, aes(horsepower, mpg), colour = "darkgray", size = 1) + 
+  geom_line(aes(colour = as.factor(df))) +
+  labs(x = "Horsepower", y = "mpg", title = "Natural Cubic Splines of Different Degrees of Freedom")
+  
+# plot resulting RSS
+ggplot(data = data.frame(df = c(2:10), rss = rss), aes(df, rss)) +
+  geom_line(colour = "blue") +
+  geom_point(colour = "blue") +
+  labs(x = "Degree of freedom", y = "RSS", title = "Scree Plot of Natural Cubic Splines")
+```
+
+Fitted natural cubic splines for degree of freedom from 2 to 10 and plotted the resulting fits. RSS decreases as degree of freedom increases.
+
+
+### (g)
+
+
+```{r, warning=FALSE}
+set.seed(66)
+n.k <- 5
+n.df <- 9
+cv.auto <- cbind(auto, fold = sample(1:n.k, nrow(auto), replace = TRUE))
+matrix.k <- matrix(nrow=n.k, ncol=n.df)
+
+for (k in 1:n.k){
+  train <- cv.auto[which(cv.auto$fold != k),]
+  test <- cv.auto[which(cv.auto$fold == k),]
+  for (n in 1:n.df){
+    fit <- lm(mpg ~ ns(horsepower, df = (n + 1)), data = train)
+    predicts <- predict(fit, newdata = test)
+    matrix.k[k, n] <- mean((test$mpg - predicts)^2)
+  }
+}
+df <- data.frame(df = 2:10, mse = apply(matrix.k,2,mean))
+
+ggplot(data = df, aes(df, mse)) +
+  geom_line(colour = "blue") +
+  geom_point(colour = "blue") +
+  labs(x = "Degree of freedom", y = "MSE", title = "Scree Plot of Natural Cubic Splines")
+```
+
+
+After performing 5-fold cross validation for a natural cubic spline, 10 degree of freedom has lowest MSE. But the differences in MSEs' are minor. So, 4 degree of freedom is much better.
+
+### (h)
+The best model among cubic splines is the one with 5 degree of freedom with 2 knots. For natural cubic splines, the one with 4 degree of freedom with 3 knots performs best. Regarding CV scores(MSE), cubic spline performs slightly better than natural cubic spline with 2 knots.
+
+
+
+## Question 2:
+
+For this problem, we first import the dataset and take a glimpse.
+
+```{r, warning=FALSE}
+library(MASS)
+boston <- MASS::Boston
+str(boston)
+summary(boston)
+```
+
+```{r}
+# chas and rad are two categorical variables
+boston <- boston %>% mutate(chas = as.factor(chas), rad = as.factor(rad))
+# create a new column named crimAbvMed
+boston <- boston %>% mutate(crimAbvMed = as.factor(ifelse(crim > median(crim),1,0))) 
+boston <- boston[,-1]
+str(boston)
+summary(boston)
+```
+
+### (a)
+
+```{r}
+set.seed(12)
+sample <- sample(1:nrow(boston), 0.8 * nrow(boston))
+train_boston <- boston[sample,]
+test_boston <- boston[-sample,]
+```
+
+
+### (b)
+
+```{r}
+library(e1071)
+set.seed(1)
+tune.out <- tune(svm, crimAbvMed ~ ., data = train_boston, kernel = "linear", ranges = list(cost = c(0.001,0.01,0.1,1:10,100)))
+summary(tune.out)
+```
+
+The optimal cost is 7.
+
+### (c)
+
+```{r}
+svm_linear <- svm(crimAbvMed ~ ., data = train_boston,kernel = "linear", cost = 7)
+summary(svm_linear)
+```
+
+```{r}
+train_predict_linear <- predict(svm_linear, newdata = train_boston)
+train_error_linear <- sum(train_predict_linear != train_boston$crimAbvMed) / nrow(train_boston)
+test_predict_linear <- predict(svm_linear, newdata = test_boston)
+test_error_linear <- sum(test_predict_linear != test_boston$crimAbvMed) / nrow(test_boston)
+```
+
+
+
+### (d)
+
+```{r}
+tune.out2 <- tune(svm, crimAbvMed ~ ., data = train_boston, kernel = "radial", ranges = list(cost = c(0.001,0.01,0.1,1:10), gamma = c(0.001,0.01,0.1,1)))
+summary(tune.out2)
+```
+
+```{r}
+svm_radial <- svm(crimAbvMed ~ ., data = train_boston,kernel = "radial", cost = tune.out2$best.parameters$cost, 
+                  gamma = tune.out2$best.parameters$gamma)
+summary(svm_radial)
+```
+
+```{r}
+train_predict_radial <- predict(svm_radial, newdata = train_boston)
+train_error_radial <- sum(train_predict_radial != train_boston$crimAbvMed) / nrow(train_boston)
+test_predict_radial <- predict(svm_radial, newdata = test_boston)
+test_error_radial <- sum(test_predict_radial != test_boston$crimAbvMed) / nrow(test_boston)
+```
+
+
+### (e)
+
+```{r}
+tune.out3 <- tune(svm, crimAbvMed ~ ., data = train_boston, kernel = "polynomial", ranges = list(cost = c(0.001,0.01,0.1,1:10), degree = c(0.001,0.01,0.1,1:10)))
+summary(tune.out3)
+```
+
+```{r}
+svm_polynomial <- svm(crimAbvMed ~ ., data = train_boston, kernel = "polynomial", cost = tune.out3$best.parameters$cost, degree = tune.out3$best.parameters$degree)
+summary(svm_polynomial)
+```
+
+```{r}
+train_predict_polynomial <- predict(svm_polynomial, newdata = train_boston)
+train_error_polynomial <- sum(train_predict_polynomial != train_boston$crimAbvMed) / nrow(train_boston)
+test_predict_polynomial <- predict(svm_polynomial, newdata = test_boston)
+test_error_polynomial <- sum(test_predict_polynomial != test_boston$crimAbvMed) / nrow(test_boston)
+```
+
+
+### (f)
+
+```{r}
+data.frame(linear = c(train_error_linear, test_error_linear), radial = c(train_error_radial, test_error_radial),
+           polynomial = c(train_error_polynomial, test_error_polynomial), row.names = c("Train Error", "Test Error"))
+```
+
+
+Comparing test errors, three models perform exactly the same for predicting out of sample data. We need more data to remarkably differentiate their performances. In this case, radial model seems the best model because its train error is smallest among models.
+
+
